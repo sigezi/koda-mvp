@@ -1,0 +1,10 @@
+{
+  "name": "chino",
+  "type": "狗",
+  "breed": "pomsky",
+  "age": 2,
+  "gender": "公",
+  "size": "小型",
+  "behavior": "睡觉",
+  "diet": "贪吃"
+}
