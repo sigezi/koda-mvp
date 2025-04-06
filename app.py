@@ -1,5 +1,3 @@
-# ✅ Koda v2.9 - 支持 Supabase 用戶隔離，日誌寫入與聊天升級
-
 import streamlit as st
 import os
 from datetime import datetime
@@ -9,17 +7,17 @@ from supabase import create_client, Client
 import plotly.graph_objects as go
 import pandas as pd
 
-# ✅ 加載環境變量
+# ✅ 加载环境变量
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-USER_ID = os.getenv("USER_ID", "user_001")
+USER_ID = os.getenv("USER_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ 初始化狀態
+# ✅ 初始化状态
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "view_logs" not in st.session_state:
@@ -28,24 +26,24 @@ if "edit_pet" not in st.session_state:
     st.session_state.edit_pet = None
 
 st.set_page_config(page_title="Koda 宠物伙伴", page_icon="🐾")
-st.title("🐶 Koda · AI 宠物伙伴")
+st.title("🐶 Koda · AI 宠物伴侣")
 
-# ✅ 加載用戶寵物資料
+# ✅ 加载当前用户的宠物资料
 pet_profiles = supabase.table("pets").select("*").eq("user_id", USER_ID).order("created_at").execute().data or []
 
-# ✅ 構建語境描述
+# ✅ 构建上下文
 pet_desc_list = []
 for p in pet_profiles:
-    desc = f"{p['name']}（{p['type']}，{p['breed']}，{p['age']}岁）"
+    desc = f"{p['name']} ({p['type']}, {p['breed']}, {p['age']}岁)"
     if p.get("behavior"):
-        desc += f"。行为：{p['behavior']}"
+        desc += f"，行为：{p['behavior']}"
     if p.get("diet"):
-        desc += f"。饮食：{p['diet']}"
+        desc += f"，饮食：{p['diet']}"
     pet_desc_list.append(desc)
 pet_intro = "、".join(pet_desc_list)
-pet_context = f"你是温柔的 AI 朋友 Koda，正陪伴主人（用戶ID：{USER_ID}），他養了這些寵物：{pet_intro}。請用朋友語氣陪伴他們，理解寵物的行為與情緒，不要使用機器語言，也不要糾正用戶內容。"
+pet_context = f"你是温柔的 AI 朋友 Koda，正陪伴主人，他们养了这些宠物：{pet_intro}。请用朋友语气陪伴他们，理解宠物的行为与情绪，不要使用机器人语言，也不要纠正用户内容。"
 
-# ✅ 側邊欄 - 寵物日誌中心
+# ✅ 侧边栏日志中心
 with st.sidebar:
     st.subheader("🐾 宠物日志中心")
     for pet in pet_profiles:
@@ -59,12 +57,24 @@ with st.sidebar:
             if st.button("✏️", key=f"edit_{pet_id}"):
                 st.session_state.edit_pet = pet_id
                 st.session_state.view_logs = None
+            if st.button("🗑️", key=f"delete_{pet_id}"):
+                if st.session_state.get(f"confirm_delete_{pet_id}") is None:
+                    st.session_state[f"confirm_delete_{pet_id}"] = True
+            else:
+                supabase.table("pets").delete().eq("id", pet_id).execute()
+                supabase.table("logs").delete().eq("pet_id", pet_id).execute()
+                st.success(f"🐾 已删除 {pet['name']} 的资料")
+                st.session_state[f"confirm_delete_{pet_id}"] = None
+                st.rerun()
+
+if st.session_state.get(f"confirm_delete_{pet_id}"):
+    st.warning(f"是否确定删除 {pet['name']}？再次点击 🗑️ 按钮确认删除")
     st.markdown("---")
     if st.button("➕ 添加新宠物"):
         st.session_state.edit_pet = "new"
         st.session_state.view_logs = None
 
-# ✅ 添加 / 修改宠物
+# ✅ 添加/修改宠物资料
 if st.session_state.edit_pet:
     pet_id = st.session_state.edit_pet
     is_new = pet_id == "new"
@@ -88,26 +98,30 @@ if st.session_state.edit_pet:
         submitted = st.form_submit_button("保存")
 
     if submitted:
-        record = {
-            "user_id": USER_ID,
-            "name": name, "type": type_, "breed": breed, "age": age,
-            "gender": gender, "size": size, "behavior": behavior, "diet": diet
-        }
-        if is_new:
-            supabase.table("pets").insert(record).execute()
-            st.success(f"欢迎 {name} 加入 Koda 家族！")
+        all_names = [p['name'] for p in pet_profiles]
+        if is_new and name in all_names:
+            st.warning("已有同名宠物，请修改名称以避免冲突 🐾")
         else:
-            supabase.table("pets").update(record).eq("id", pet_id).execute()
-            st.success("宠物资料已更新 ✅")
-        st.session_state.edit_pet = None
-        st.rerun()
+            record = {
+                "name": name, "type": type_, "breed": breed, "age": age,
+                "gender": gender, "size": size, "behavior": behavior,
+                "diet": diet, "user_id": USER_ID
+            }
+            if is_new:
+                supabase.table("pets").insert(record).execute()
+                st.success(f"欢迎 {name} 加入 Koda 家族！")
+            else:
+                supabase.table("pets").update(record).eq("id", pet_id).execute()
+                st.success("宠物资料已更新 ✅")
+            st.session_state.edit_pet = None
+            st.rerun()
 
-# ✅ 成長日誌與圖譜
+# ✅ 成长图谱
 if st.session_state.view_logs:
     pet_id = st.session_state.view_logs
     pet = next((p for p in pet_profiles if p["id"] == pet_id), {})
     st.subheader(f"📘 {pet['name']} 的成长记录")
-    st.markdown(f"**年龄**：{pet['age']}岁")
+    st.markdown(f"**年龄**：{pet['age']}岁  ")
     st.markdown(f"**品种**：{pet['breed']} / {pet['type']}")
     if pet.get("behavior"):
         st.markdown(f"**行为偏好**：{pet['behavior']}")
@@ -115,10 +129,10 @@ if st.session_state.view_logs:
         st.markdown(f"**饮食偏好**：{pet['diet']}")
 
     st.markdown("---")
-    st.markdown("### 📈 成长图谱（按需加载）")
+    st.markdown("### 📊 成长图谱（按需加载）")
 
     def plot_log_chart(log_type):
-        logs = supabase.table("logs").select("*").eq("pet_id", pet_id).eq("user_id", USER_ID).eq("log_type", log_type).order("date", desc=True).limit(30).execute().data
+        logs = supabase.table("logs").select("*").eq("pet_id", pet_id).eq("log_type", log_type).order("date", desc=True).limit(30).execute().data
         if logs:
             df = pd.DataFrame(logs)
             fig = go.Figure(go.Bar(x=df['date'], y=[1]*len(df), text=df['summary'], hoverinfo="text"))
@@ -143,7 +157,7 @@ if st.session_state.view_logs:
         st.rerun()
     st.stop()
 
-# ✅ 初次問候
+# ✅ 初次问候
 if len(st.session_state.chat_history) == 0:
     def get_greeting():
         hour = datetime.now().hour
@@ -159,10 +173,11 @@ if len(st.session_state.chat_history) == 0:
             return "夜晚降临了～该和毛孩子抱一抱啦 🐾"
     st.session_state.chat_history.append({"role": "assistant", "content": get_greeting()})
 
-# ✅ 聊天區域
+# ✅ 聊天展示
 for chat in st.session_state.chat_history:
     st.chat_message(chat["role"]).markdown(chat["content"])
 
+# ✅ 聊天输入框 + 自动记录日志
 if prompt := st.chat_input("和我聊聊你和宠物今天的生活吧..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.chat_history.append({"role": "user", "content": prompt})
@@ -179,18 +194,16 @@ if prompt := st.chat_input("和我聊聊你和宠物今天的生活吧..."):
     st.chat_message("assistant").markdown(reply)
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-    # ✅ 自動分類日誌
-    def detect_log_type(text):
-        lower = text.lower()
+    def detect_log_type(prompt):
+        lower = prompt.lower()
         if any(x in lower for x in ["吃", "喂", "煮"]): return "food"
-        if any(x in lower for x in ["焦虑", "开心", "情绪", "烦"]): return "mood"
-        if any(x in lower for x in ["便便", "拉", "吐", "检查", "体检"]): return "health"
+        elif any(x in lower for x in ["焦虑", "开心", "情绪", "烦"]): return "mood"
+        elif any(x in lower for x in ["便便", "拉", "吐", "检查", "体检"]): return "health"
         return None
 
     log_type = detect_log_type(prompt)
     if log_type and pet_profiles:
         supabase.table("logs").insert({
-            "user_id": USER_ID,
             "pet_id": pet_profiles[0]["id"],
             "log_type": log_type,
             "summary": prompt,
