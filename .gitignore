@@ -64,4 +64,18 @@ htmlcov/
 pytest.ini
 
 # Supabase
-supabase/ 
+supabase/
+
+# 本地配置
+.env*
+
+# 数据文件
+data/
+*.db
+*.sqlite3
+
+# 缓存
+.cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints 

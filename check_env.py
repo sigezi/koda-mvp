@@ -1,56 +1,136 @@
+"""
+环境变量检查脚本
+
+此脚本用于验证所有必需的环境变量是否存在且格式正确。
+在应用启动前运行此脚本可以及早发现配置问题。
+"""
+
 import os
-from typing import List, Dict
-from dotenv import load_dotenv
+import re
+from typing import Dict, List, Optional
+from dataclasses import dataclass
 
-# 加载环境变量
-load_dotenv()
+@dataclass
+class EnvVar:
+    """环境变量配置类"""
+    name: str
+    required: bool = True
+    pattern: Optional[str] = None
+    description: str = ""
 
-# 必需的环境变量列表
-REQUIRED_ENV_VARS: Dict[str, str] = {
-    'OPENAI_API_KEY': 'OpenAI API密钥',
-    'SUPABASE_URL': 'Supabase项目URL',
-    'SUPABASE_KEY': 'Supabase API密钥',
-    'USER_ID': '用户ID'
-}
+# 定义所需的环境变量及其验证规则
+REQUIRED_ENV_VARS: List[EnvVar] = [
+    EnvVar(
+        name="OPENAI_API_KEY",
+        pattern=r"^sk-[A-Za-z0-9]{48}$",
+        description="OpenAI API密钥，格式应为'sk-'开头的51个字符"
+    ),
+    EnvVar(
+        name="SUPABASE_URL",
+        pattern=r"^https?://[^\s/$.?#].[^\s]*$",
+        description="Supabase项目URL，应为有效的HTTPS URL"
+    ),
+    EnvVar(
+        name="SUPABASE_KEY",
+        pattern=r"^ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*$",
+        description="Supabase项目密钥，应为有效的JWT格式"
+    ),
+    EnvVar(
+        name="FLOWISE_API_URL",
+        pattern=r"^https?://[^\s/$.?#].[^\s]*$",
+        description="Flowise API URL，应为有效的HTTP(S) URL"
+    ),
+    EnvVar(
+        name="FLOWISE_API_KEY",
+        required=False,
+        description="Flowise API密钥（可选）"
+    ),
+    EnvVar(
+        name="USER_ID",
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="用户ID，仅允许字母、数字、下划线和连字符"
+    ),
+    EnvVar(
+        name="DEBUG",
+        required=False,
+        pattern=r"^(true|false)$",
+        description="调试模式开关，值应为'true'或'false'"
+    ),
+    EnvVar(
+        name="LOG_LEVEL",
+        required=False,
+        pattern=r"^(debug|info|warning|error|critical)$",
+        description="日志级别，应为标准日志级别之一"
+    ),
+    EnvVar(
+        name="PORT",
+        required=False,
+        pattern=r"^\d+$",
+        description="应用端口号，应为数字"
+    ),
+    EnvVar(
+        name="ENVIRONMENT",
+        required=False,
+        pattern=r"^(development|staging|production)$",
+        description="运行环境，应为'development'、'staging'或'production'"
+    )
+]
 
-# 可选的环境变量列表
-OPTIONAL_ENV_VARS: Dict[str, str] = {
-    'FLOWISE_API_URL': 'FlowiseAI API URL',
-    'FLOWISE_API_KEY': 'FlowiseAI API密钥'
-}
-
-def validate_env() -> None:
+def check_env_vars() -> Dict[str, List[str]]:
     """
-    验证所有必需的环境变量是否已正确设置
-    
-    Raises:
-        ValueError: 当任何必需的环境变量未设置时抛出
+    检查环境变量是否符合要求
+
+    Returns:
+        Dict[str, List[str]]: 包含错误和警告信息的字典
     """
-    missing_vars: List[str] = []
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    for env_var in REQUIRED_ENV_VARS:
+        value = os.getenv(env_var.name)
+        
+        # 检查必需的环境变量是否存在
+        if env_var.required and not value:
+            errors.append(f"缺少必需的环境变量: {env_var.name}")
+            continue
+            
+        # 如果变量存在且有模式要求，则验证其格式
+        if value and env_var.pattern:
+            if not re.match(env_var.pattern, value):
+                if env_var.required:
+                    errors.append(
+                        f"环境变量 {env_var.name} 格式不正确。{env_var.description}"
+                    )
+                else:
+                    warnings.append(
+                        f"可选环境变量 {env_var.name} 格式不正确。{env_var.description}"
+                    )
+
+    return {
+        "errors": errors,
+        "warnings": warnings
+    }
+
+def main():
+    """主函数：运行环境变量检查并打印结果"""
+    print("正在检查环境变量...")
+    results = check_env_vars()
     
-    # 检查所有必需的环境变量
-    for var_name, var_description in REQUIRED_ENV_VARS.items():
-        if not os.getenv(var_name):
-            missing_vars.append(f"{var_name} ({var_description})")
+    if results["errors"]:
+        print("\n❌ 发现错误:")
+        for error in results["errors"]:
+            print(f"  - {error}")
+            
+    if results["warnings"]:
+        print("\n⚠️ 发现警告:")
+        for warning in results["warnings"]:
+            print(f"  - {warning}")
+            
+    if not results["errors"] and not results["warnings"]:
+        print("\n✅ 所有环境变量配置正确！")
     
-    # 如果有缺失的环境变量，抛出异常
-    if missing_vars:
-        error_message = "以下必需的环境变量未设置：\n"
-        error_message += "\n".join(f"- {var}" for var in missing_vars)
-        error_message += "\n\n请在.env文件中设置这些变量。"
-        raise ValueError(error_message)
-    
-    # 验证 Supabase URL 格式
-    supabase_url = os.getenv('SUPABASE_URL', '')
-    if not supabase_url.startswith(('http://', 'https://')):
-        raise ValueError("SUPABASE_URL 必须是有效的 HTTP/HTTPS URL")
-    
-    # 验证 OpenAI API 密钥格式
-    openai_key = os.getenv('OPENAI_API_KEY', '')
-    if not openai_key.startswith('sk-'):
-        raise ValueError("OPENAI_API_KEY 格式不正确，应以 'sk-' 开头")
-    
-    # 验证可选的 FlowiseAI URL 格式（如果提供）
-    flowise_url = os.getenv('FLOWISE_API_URL')
-    if flowise_url and not flowise_url.startswith(('http://', 'https://')):
-        raise ValueError("FLOWISE_API_URL 必须是有效的 HTTP/HTTPS URL") 
+    # 如果有错误，返回非零状态码
+    return len(results["errors"]) > 0
+
+if __name__ == "__main__":
+    exit(main()) 
